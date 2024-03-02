@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ort::{GraphOptimizationLevel, Session};
 use pacosako::{self, DenseBoard};
 
@@ -31,19 +33,17 @@ fn main() -> Result<(), ort::Error> {
     let input_repr: &mut [f32; 8 * 8 * 30] = &mut [0.; 8 * 8 * 30];
     pacosako::ai::repr::tensor_representation(&board, input_repr);
 
-    // convert out to an ndarray
-    let out: ndarray::Array<_, _> =
-        ndarray::Array::from_shape_vec((1, 30, 8, 8), input_repr.to_vec()).unwrap();
+    let input_shape: Vec<i64> = vec![1, 30, 8, 8_i64];
+    let input_data: Box<[f32]> = input_repr.to_vec().into_boxed_slice();
 
-    let outputs = model.run(ort::inputs![out]?)?;
+    let input = ort::Value::try_from((input_shape, Arc::new(input_data)))?;
 
-    let output: ort::Tensor<'_, f32> = outputs["OUTPUT"].extract_tensor::<f32>()?;
+    let outputs = model.run(ort::inputs![input]?)?;
 
-    let output = output.view();
-    let output = output.as_slice().unwrap();
+    let (o_shape, o_data): (Vec<i64>, &[f32]) = outputs["OUTPUT"].extract_raw_tensor()?;
 
-    let value = output[0];
-    let policy = &output[1..=132];
+    let value = o_data[0];
+    let policy = &o_data[1..=132];
 
     println!("Value: {}", value);
     println!("Policy: {:?}", policy);
@@ -81,9 +81,7 @@ use ort::{TensorElementType, ValueType};
 
 fn display_element_type(t: TensorElementType) -> &'static str {
     match t {
-        TensorElementType::Bfloat16 => "bf16",
         TensorElementType::Bool => "bool",
-        TensorElementType::Float16 => "f16",
         TensorElementType::Float32 => "f32",
         TensorElementType::Float64 => "f64",
         TensorElementType::Int16 => "i16",
